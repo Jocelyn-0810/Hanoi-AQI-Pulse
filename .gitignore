@@ -1,0 +1,51 @@
+# Secrets / local configuration
+aqicn_api_key.md
+.env
+.env.*
+
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Codex/agent local state
+.agents/
+.codex/
+
+# Large raw datasets. Keep only the small GeoJSON required by the app.
+data/*
+!data/hanoi_districts.geojson
+
+# Reference project downloaded for research, not required to run this app.
+Hanoi-Air-Quality-Analysis/
+
+# Processed data: keep the two compact files the app uses by default.
+dashboard/processed/*
+!dashboard/processed/hanoi_city_hourly.parquet
+!dashboard/processed/hanoi_district_daily.parquet
+
+# Temporary logs and local outputs
+*.log
+logs/
+tmp/
+temp/
+
+# Shiny / local vendor caches
+dashboard/.vendor/
+
+# Large optional derived files
+dashboard/processed/hanoi_district_hourly.parquet
+dashboard/processed/model_features.parquet
+data/vietnam_adm2_raw.geojson
