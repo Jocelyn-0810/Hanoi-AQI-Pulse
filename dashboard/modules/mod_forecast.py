@@ -52,6 +52,7 @@ def forecast_ui():
         ui.div(
             ui.input_radio_buttons("horizon", "Forecast Horizon", choices=list(HORIZONS.keys()), selected="6h", inline=True),
             ui.input_radio_buttons("target", "Target", choices=["AQI", "PM2.5"], selected="AQI", inline=True),
+            ui.input_radio_buttons("data_mode", "Training Data", choices={"raw": "Raw", "cleaned": "Cleaned"}, selected="raw", inline=True),
             class_="control-bar",
         ),
         # Prediction hero
@@ -109,12 +110,14 @@ def forecast_server(
     def current_model():
         target = "pm25" if input.target() == "PM2.5" else "aqi"
         horizon = HORIZONS[input.horizon()]
-        return get_model(horizon, target)
+        data_mode = "cleaned" if input.data_mode() == "cleaned" else "raw"
+        return get_model(horizon, target, data_mode)
 
     def current_prediction_context() -> dict[str, Any]:
         target = "pm25" if input.target() == "PM2.5" else "aqi"
         horizon = HORIZONS[input.horizon()]
-        return prediction_context(horizon, target)
+        data_mode = "cleaned" if input.data_mode() == "cleaned" else "raw"
+        return prediction_context(horizon, target, data_mode)
 
     @output
     @render.ui
@@ -199,11 +202,18 @@ def forecast_server(
         model_info = ""
         if model is not None:
             improvement = 100 * (model.baseline_mae - model.mae) / model.baseline_mae if model.baseline_mae else 0
-            model_info = f"Our {model.model_name} model is {improvement:.0f}% more accurate than simply assuming no change."
+            mode_label = "cleaned, anomaly-aware" if getattr(model, "data_mode", "raw") == "cleaned" else "raw"
+            model_info = (
+                f"Our <span class='insight-highlight'>{model.model_name}</span> model trained on "
+                f"<span class='insight-soft'>{mode_label}</span> data is "
+                f"<span class='insight-highlight'>{improvement:.0f}%</span> more accurate than simply assuming no change."
+            )
         return ui.div(
             ui.div("HOW WE PREDICT THIS", class_="insight-label"),
-            ui.p(f"This {horizon}-hour forecast uses the latest air quality measurements, weather data (temperature, humidity, pressure), "
-                 f"and time-of-day patterns. {model_info}"),
+            ui.p(ui.HTML(
+                f"This <span class='insight-highlight'>{horizon}-hour</span> forecast uses the latest air quality measurements, "
+                f"weather data (temperature, humidity, pressure), and time-of-day patterns. {model_info}"
+            )),
             class_="insight-box",
         )
 
@@ -231,8 +241,12 @@ def forecast_server(
             return ui.div()
         return ui.div(
             ui.div("WHAT THIS SHOWS", class_="insight-label"),
-            ui.p(f"Lower bars = better predictions. Our model predicts {input.target()} within ±{model.mae:.0f} points on average, "
-                 f"compared to ±{model.baseline_mae:.0f} for the no-change baseline."),
+            ui.p(ui.HTML(
+                f"Lower bars = better predictions. This <span class='insight-soft'>{getattr(model, 'data_mode', 'raw')}</span> model predicts "
+                f"<span class='insight-highlight'>{input.target()}</span> within "
+                f"<span class='insight-highlight'>±{model.mae:.0f}</span> points on average, compared to "
+                f"<span class='insight-risk'>±{model.baseline_mae:.0f}</span> for the no-change baseline."
+            )),
             class_="insight-box",
         )
 
@@ -259,8 +273,11 @@ def forecast_server(
         top_names = [f.replace("_", " ").title() for f in top_feat]
         return ui.div(
             ui.div("WHAT THIS SHOWS", class_="insight-label"),
-            ui.p(f"The top predictors are: {', '.join(top_names)}. "
-                 "These features have the strongest correlation with future air quality levels."),
+            ui.p(ui.HTML(
+                "The top predictors are: "
+                + ", ".join(f"<span class='insight-highlight'>{name}</span>" for name in top_names)
+                + ". These features have the strongest correlation with future air quality levels."
+            )),
             class_="insight-box",
         )
 
@@ -300,7 +317,11 @@ def forecast_server(
             return ui.div()
         return ui.div(
             ui.div("WHAT THIS SHOWS", class_="insight-label"),
-            ui.p(f"White line = actual values, teal line = model predictions. "
-                 f"Our model (MAE: {model.mae:.1f}) tracks the actual values more closely than the no-change baseline (MAE: {model.baseline_mae:.1f})."),
+            ui.p(ui.HTML(
+                "White line = actual values, teal line = model predictions. "
+                f"The <span class='insight-soft'>{getattr(model, 'data_mode', 'raw')}</span> model "
+                f"(<span class='insight-highlight'>MAE: {model.mae:.1f}</span>) tracks the actual values more closely than "
+                f"the no-change baseline (<span class='insight-risk'>MAE: {model.baseline_mae:.1f}</span>)."
+            )),
             class_="insight-box",
         )

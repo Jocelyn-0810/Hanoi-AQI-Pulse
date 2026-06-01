@@ -127,7 +127,7 @@ app_ui = ui.page_navbar(
     ),
     id="main_navbar",
     header=ui.tags.head(
-        ui.tags.link(rel="stylesheet", href="styles.css"),
+        ui.tags.link(rel="stylesheet", href="styles.css?v=20260601-hero-aqi-marker"),
         ui.tags.meta(name="description", content="Interactive air quality dashboard for Hanoi, Vietnam — real-time AQI, district analysis, historical trends, and ML-powered forecasts."),
         ui.tags.title("Hanoi Air Quality Pulse"),
     ),
@@ -145,16 +145,16 @@ def server(input, output, session):
 
     # ── Model management ──────────────────────────────────────────────────
 
-    def get_model(horizon: int, target_col: str = "aqi") -> ModelArtifacts | None:
-        cache_key = (horizon, target_col)
+    def get_model(horizon: int, target_col: str = "aqi", data_mode: str = "raw") -> ModelArtifacts | None:
+        cache_key = (horizon, target_col, data_mode)
         if cache_key in model_cache:
             return model_cache[cache_key]
-        artifact = load_model_artifact(MODEL_DIR, horizon, target_col=target_col)
+        artifact = load_model_artifact(MODEL_DIR, horizon, target_col=target_col, data_mode=data_mode)
         if artifact is not None:
             model_cache[cache_key] = artifact
             return artifact
         try:
-            model_cache[cache_key] = train_city_model(CITY, horizon_hours=horizon, target_col=target_col)
+            model_cache[cache_key] = train_city_model(CITY, horizon_hours=horizon, target_col=target_col, data_mode=data_mode)
             save_model_artifact(model_cache[cache_key], MODEL_DIR)
             return model_cache[cache_key]
         except Exception:
@@ -192,12 +192,13 @@ def server(input, output, session):
 
     # ── Prediction context ───────────────────────────────────────────────
 
-    def prediction_context(horizon: int = 6, target_col: str = "aqi") -> dict[str, Any]:
-        model = get_model(horizon, target_col=target_col)
+    def prediction_context(horizon: int = 6, target_col: str = "aqi", data_mode: str = "raw") -> dict[str, Any]:
+        model = get_model(horizon, target_col=target_col, data_mode=data_mode)
         df = CITY.copy()
         if df.empty or df[target_col].dropna().empty:
             return {"model": model, "pred": np.nan, "baseline": np.nan, "delta": np.nan}
-        baseline = float(df[target_col].dropna().iloc[-1])
+        baseline_col = f"{target_col}_clean" if data_mode == "cleaned" and f"{target_col}_clean" in df.columns else target_col
+        baseline = float(df[baseline_col].dropna().iloc[-1])
         pred = baseline
         snap = snapshot_val.get()
         if model is not None:

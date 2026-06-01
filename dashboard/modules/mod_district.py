@@ -319,15 +319,21 @@ def district_server(
             city_avg = df["aqi_daily"].mean()
             return ui.div(
                 ui.div("WHAT THIS SHOWS", class_="insight-label"),
-                ui.p(f"No district is selected. The map keeps Hanoi in a muted context layer; city-wide average is {city_avg:.0f} AQI."),
+                ui.p(ui.HTML(
+                    "No district is selected. The map keeps Hanoi in a muted context layer; "
+                    f"city-wide average is <span class='insight-highlight'>{city_avg:.0f} AQI</span>."
+                )),
                 class_="insight-box",
             )
         if len(selected) == len(DISTRICT_CHOICES):
             city_avg = df["aqi_daily"].mean() if not df.empty else 0
             return ui.div(
                 ui.div("WHAT THIS SHOWS", class_="insight-label"),
-                ui.p(f"The map shows average AQI across Hanoi's 30 districts. City-wide average is {city_avg:.0f} AQI. "
-                     "Untick districts to isolate local AQI hotspots."),
+                ui.p(ui.HTML(
+                    "The map shows average AQI across Hanoi's "
+                    f"<span class='insight-highlight'>30 districts</span>. City-wide average is "
+                    f"<span class='insight-highlight'>{city_avg:.0f} AQI</span>. Untick districts to isolate local AQI hotspots."
+                )),
                 class_="insight-box",
             )
         dist_data = df[df["district"].isin(selected)]
@@ -338,8 +344,12 @@ def district_server(
         label = selected[0] if len(selected) == 1 else f"{len(selected)} selected districts"
         return ui.div(
             ui.div("DISTRICT INSIGHT", class_="insight-label"),
-            ui.p(f"{label}' average AQI ({dist_avg:.0f}) is {abs(pct):.0f}% {direction} the city average ({city_avg:.0f}). "
-                 f"Category: {aqi_category(dist_avg)}."),
+            ui.p(ui.HTML(
+                f"{label}' average AQI (<span class='insight-highlight'>{dist_avg:.0f}</span>) is "
+                f"<span class='insight-highlight'>{abs(pct):.0f}%</span> {direction} the city average "
+                f"(<span class='insight-soft'>{city_avg:.0f}</span>). Category: "
+                f"<span class='insight-highlight'>{aqi_category(dist_avg)}</span>."
+            )),
             class_="insight-box",
         )
 

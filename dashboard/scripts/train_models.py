@@ -16,22 +16,29 @@ DATA_ROOT = PROJECT_ROOT / "data"
 MODEL_DIR = DASHBOARD_ROOT / "models"
 HORIZONS = [1, 6, 24]
 TARGETS = ["aqi", "pm25"]
+DATA_MODES = ["raw", "cleaned"]
 
 
 def main() -> None:
     bundle = load_bundle(DATA_ROOT)
-    for target in TARGETS:
-        for horizon in HORIZONS:
-            print(f"\nTraining {target.upper()} +{horizon}h ...")
-            artifact = train_city_model(bundle.city_hourly, horizon_hours=horizon, target_col=target)
-            path = save_model_artifact(artifact, MODEL_DIR)
-            size_mb = path.stat().st_size / 1e6
-            print(
-                f"  saved {path.name}: model={artifact.model_name}, "
-                f"MAE={artifact.mae:.2f}, RMSE={artifact.rmse:.2f}, "
-                f"baseline_MAE={artifact.baseline_mae:.2f}, "
-                f"size={size_mb:.1f}MB"
-            )
+    for data_mode in DATA_MODES:
+        for target in TARGETS:
+            for horizon in HORIZONS:
+                print(f"\nTraining {target.upper()} +{horizon}h [{data_mode}] ...")
+                artifact = train_city_model(
+                    bundle.city_hourly,
+                    horizon_hours=horizon,
+                    target_col=target,
+                    data_mode=data_mode,
+                )
+                path = save_model_artifact(artifact, MODEL_DIR)
+                size_mb = path.stat().st_size / 1e6
+                print(
+                    f"  saved {path.name}: model={artifact.model_name}, "
+                    f"MAE={artifact.mae:.2f}, RMSE={artifact.rmse:.2f}, "
+                    f"baseline_MAE={artifact.baseline_mae:.2f}, "
+                    f"size={size_mb:.1f}MB"
+                )
 
 
 if __name__ == "__main__":

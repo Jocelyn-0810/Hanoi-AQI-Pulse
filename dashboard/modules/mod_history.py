@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 from shiny import module, reactive, render, ui
 from shinywidgets import output_widget, render_widget
 
+from src.anomaly import metric_col_for_mode, quality_summary
 from src.utils import AQI_BANDS, aqi_category, aqi_color, sanitize_figure
 
 
@@ -35,7 +36,17 @@ def _blank(msg: str = "No data available") -> go.Figure:
 
 POLLUTANT_MAP = {"AQI": "aqi", "PM2.5": "pm25", "PM10": "pm10"}
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-YEAR_COLORS = {2022: "#4fc3f7", 2023: "#9aa0a6", 2024: "#ce93d8", 2025: "#7986cb", 2026: "#f5b700"}
+YEAR_COLORS = {2022: "#7fa8ff", 2023: "#6f83aa", 2024: "#294275", 2025: "#4b9ddb", 2026: "#f6d433"}
+CURRENT_YEAR_COLOR = "#f6d433"
+CATEGORY_ORDER = ["Good", "Moderate", "USG", "Unhealthy", "Very Unhealthy", "Hazardous"]
+CATEGORY_COLORS = {
+    "Good": "#4cc51a",
+    "Moderate": "#f5cf2f",
+    "USG": "#f28f3b",
+    "Unhealthy": "#e84d78",
+    "Very Unhealthy": "#b83cc4",
+    "Hazardous": "#d71f35",
+}
 
 
 # ── UI ──────────────────────────────────────────────────────────────────────────
@@ -53,8 +64,11 @@ def history_ui():
         ui.div(
             ui.input_radio_buttons("pollutant", "Indicator", choices=list(POLLUTANT_MAP.keys()), selected="AQI", inline=True),
             ui.input_select("cal_year", "Year", choices=[str(y) for y in range(2025, 2021, -1)], selected="2024", width="100px"),
+            ui.input_radio_buttons("data_mode", "Data Mode", choices={"raw": "Raw", "cleaned": "Cleaned"}, selected="raw", inline=True),
+            ui.input_checkbox("show_anomalies", "Show anomaly markers", value=False),
             class_="control-bar",
         ),
+        ui.output_ui("quality_insight"),
         # Calendar heatmap
         ui.div(
             ui.h4(ui.output_text("cal_title")),
@@ -82,6 +96,17 @@ def history_ui():
         # Category matrix
         ui.div(
             ui.h4("Days by Air Quality Category"),
+            ui.div(
+                ui.div(
+                    ui.h4(ui.output_text("category_donut_title"), style="margin-bottom:2px;"),
+                    ui.div("Hanoi, Vietnam", class_="page-intro-sub"),
+                    output_widget("category_donut", height="270px"),
+                    class_="category-donut-card",
+                ),
+                ui.output_ui("category_days_summary"),
+                class_="category-days-grid",
+            ),
+            ui.h4("No. of Days by Month", style="margin-top:18px;"),
             ui.output_ui("category_matrix_ui"),
             ui.output_ui("category_insight"),
             class_="panel",
@@ -99,22 +124,66 @@ def history_server(
 ):
     @reactive.calc
     def metric_col():
+        raw_col = POLLUTANT_MAP[input.pollutant()]
+        return metric_col_for_mode(city_hourly, raw_col, input.data_mode())
+
+    @reactive.calc
+    def raw_metric_col():
         return POLLUTANT_MAP[input.pollutant()]
 
     @reactive.calc
     def daily_data():
         col = metric_col()
+        raw_col = raw_metric_col()
         df = city_hourly.copy()
         if col not in df.columns:
             return pd.DataFrame()
-        daily = df.set_index("local_time")[col].resample("D").mean().dropna().reset_index()
-        daily.columns = ["date", "value"]
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+        agg_spec = {"value": (col, "mean")}
+        anomaly_col = f"{raw_col}_is_anomaly"
+        sensor_col = f"{raw_col}_is_sensor_like"
+        if anomaly_col in df.columns:
+            agg_spec["anomaly_count"] = (anomaly_col, "sum")
+        if sensor_col in df.columns:
+            agg_spec["sensor_like_count"] = (sensor_col, "sum")
+        if "is_extreme_episode" in df.columns:
+            agg_spec["episode_count"] = ("is_extreme_episode", "sum")
+        daily = df.set_index("local_time").resample("D").agg(**agg_spec).dropna(subset=["value"]).reset_index()
+        daily = daily.rename(columns={"local_time": "date"})
+        for count_col in ["anomaly_count", "sensor_like_count", "episode_count"]:
+            if count_col not in daily.columns:
+                daily[count_col] = 0
         daily["year"] = daily["date"].dt.year
         daily["month"] = daily["date"].dt.month
         daily["day"] = daily["date"].dt.day
         daily["dow"] = daily["date"].dt.dayofweek  # 0=Mon
         daily["week"] = daily["date"].dt.isocalendar().week.astype(int)
         return daily
+
+    @output
+    @render.ui
+    def quality_insight():
+        summary = quality_summary(city_hourly)
+        if summary.rows == 0:
+            return ui.div()
+        pct = summary.anomaly_rows / summary.rows * 100
+        sensor_pct = summary.sensor_like_rows / summary.rows * 100
+        episode_pct = summary.episode_rows / summary.rows * 100
+        mode_text = "raw measurements" if input.data_mode() == "raw" else "cleaned measurements with isolated sensor-like spikes smoothed"
+        return ui.div(
+            ui.div("DATA QUALITY MODE", class_="insight-label"),
+            ui.p(ui.HTML(
+                f"History charts are showing {mode_text}. The city-level dataset contains "
+                f"<span class='insight-highlight'>{summary.anomaly_rows:,}</span> flagged rows "
+                f"(<span class='insight-highlight'>{pct:.1f}%</span>): "
+                f"<span class='insight-soft'>{summary.sensor_like_rows:,}</span> sensor-like rows "
+                f"(<span class='insight-soft'>{sensor_pct:.1f}%</span>) and "
+                f"<span class='insight-risk'>{summary.episode_rows:,}</span> multi-pollutant episode rows "
+                f"(<span class='insight-risk'>{episode_pct:.1f}%</span>). "
+                "Cleaned mode keeps likely real pollution episodes and only smooths isolated or physically invalid spikes."
+            )),
+            class_="insight-box",
+        )
 
     # ── Calendar Heatmap ────────────────────────────────────────────────────
 
@@ -142,7 +211,10 @@ def history_server(
         text_matrix = [["" for _ in range(max_week)] for _ in range(7)]
         for _, row in yr.iterrows():
             matrix[row["dow"]][row["week_in_year"]] = row["value"]
-            text_matrix[row["dow"]][row["week_in_year"]] = f"{row['date'].strftime('%b %d')}: {row['value']:.0f}"
+            anomaly_note = ""
+            if row.get("anomaly_count", 0) > 0:
+                anomaly_note = f"<br>Flagged hours: {int(row.get('anomaly_count', 0))}"
+            text_matrix[row["dow"]][row["week_in_year"]] = f"{row['date'].strftime('%b %d')}: {row['value']:.0f}{anomaly_note}"
 
         # Month labels on x-axis
         month_ticks = []
@@ -218,19 +290,31 @@ def history_server(
         years = sorted(month_data["year"].unique())
         for yr in years:
             yr_data = month_data[month_data["year"] == yr].sort_values("day")
-            color = YEAR_COLORS.get(yr, "#9aa0a6")
-            is_current = yr == years[-1]
+            is_current = bool(yr == years[-1])
+            color = CURRENT_YEAR_COLOR if is_current else YEAR_COLORS.get(yr, "#6f83aa")
             fig.add_trace(go.Scatter(
                 x=list(yr_data["day"]),
                 y=list(yr_data["value"]),
                 mode="lines+markers" if is_current else "lines",
                 name=str(yr),
-                line={"color": color, "width": 3 if is_current else 1.5},
-                marker={"size": 6} if is_current else None,
+                line={"color": color, "width": 3 if is_current else 1.7, "shape": "spline", "smoothing": 1.2},
+                marker={"size": 7, "color": color, "line": {"width": 0}} if is_current else None,
                 fill="tozeroy" if is_current else None,
-                fillcolor=f"rgba(200,164,21,0.1)" if is_current else None,
-                opacity=1.0 if is_current else 0.6,
+                fillcolor="rgba(246,211,51,0.22)" if is_current else None,
+                opacity=1.0 if is_current else 0.68,
             ))
+            if input.show_anomalies() and "anomaly_count" in yr_data.columns:
+                flagged = yr_data[yr_data["anomaly_count"] > 0]
+                if not flagged.empty:
+                    fig.add_trace(go.Scatter(
+                        x=list(flagged["day"]),
+                        y=list(flagged["value"]),
+                        mode="markers",
+                        name=f"{yr} flagged",
+                        marker={"symbol": "x", "size": 9 if is_current else 7, "color": "#ff5c7a", "line": {"width": 1}},
+                        hovertemplate="Flagged day %{x}<br>Value %{y:.0f}<extra></extra>",
+                        showlegend=is_current,
+                    ))
         fig.update_xaxes(title="Day of Month", dtick=2)
         fig.update_yaxes(title=input.pollutant())
         fig.update_layout(
@@ -256,15 +340,19 @@ def history_server(
         if len(same_day) > 1:
             parts = []
             for _, r in same_day.sort_values("year").iterrows():
-                parts.append(f"{int(r['year'])}: {r['value']:.0f}")
+                color_class = "insight-highlight" if int(r["year"]) == int(same_day["year"].max()) else "insight-soft"
+                parts.append(f"{int(r['year'])}: <span class='{color_class}'>{r['value']:.0f}</span>")
             text = f"Same Day Analysis ({today_day}{_ordinal(today_day)} {MONTH_NAMES[now.month-1]}): " + ", ".join(parts) + "."
         else:
             text = ""
 
         return ui.div(
             ui.div("WHAT THIS SHOWS", class_="insight-label"),
-            ui.p(f"Comparing {MONTH_NAMES[now.month-1]} AQI across years reveals seasonal patterns. "
-                 f"The filled area shows the most recent year. {text}"),
+            ui.p(ui.HTML(
+                f"Comparing <span class='insight-highlight'>{MONTH_NAMES[now.month-1]}</span> "
+                f"<span class='insight-highlight'>{input.pollutant()}</span> across years reveals seasonal patterns. "
+                f"The filled area shows the most recent year. {text}"
+            )),
             class_="insight-box",
         )
 
@@ -328,6 +416,124 @@ def history_server(
     # ── Category Matrix (No. of Days) ──────────────────────────────────────
 
     @output
+    @render.text
+    def category_donut_title():
+        df = daily_data()
+        if df.empty:
+            return "Days vs Air Quality"
+        return f"{int(df['year'].max())} Days vs Air Quality"
+
+    @output
+    @render_widget
+    def category_donut():
+        df = daily_data()
+        if df.empty:
+            return _blank()
+        latest_year = int(df["year"].max())
+        yr = df[df["year"] == latest_year].copy()
+        yr["category"] = yr["value"].apply(aqi_category)
+        counts = yr["category"].value_counts()
+        category_counts = [(cat, int(counts.get(cat, 0))) for cat in CATEGORY_ORDER]
+        category_counts = [(cat, cnt) for cat, cnt in category_counts if cnt > 0]
+        labels = [cat for cat, _ in category_counts]
+        values = [cnt for _, cnt in category_counts]
+        colors = [CATEGORY_COLORS[cat] for cat in labels]
+
+        fig = go.Figure(go.Pie(
+            labels=labels,
+            values=values,
+            hole=0.62,
+            sort=False,
+            direction="clockwise",
+            marker={"colors": colors, "line": {"color": "#282c34", "width": 2}},
+            textinfo="percent",
+            textfont={"color": "#e8eaed", "size": 12, "family": "Inter, system-ui, sans-serif"},
+            hovertemplate="%{label}<br>%{value} day(s)<br>%{percent}<extra></extra>",
+        ))
+        fig.add_annotation(
+            text=f"<b>{latest_year}</b>",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font={"size": 20, "color": "#e8eaed"},
+        )
+        fig.update_layout(showlegend=False)
+        return _dark_fig(fig, height=270)
+
+    @output
+    @render.ui
+    def category_days_summary():
+        df = daily_data()
+        if df.empty:
+            return ui.div()
+        latest_year = int(df["year"].max())
+        yr = df[df["year"] == latest_year].copy()
+        yr["category"] = yr["value"].apply(aqi_category)
+        counts = yr["category"].value_counts()
+        total_days = int(len(yr))
+        good_days = int(counts.get("Good", 0))
+        non_good_days = total_days - good_days
+        worst_cat = None
+        for cat in reversed(CATEGORY_ORDER):
+            if counts.get(cat, 0) > 0:
+                worst_cat = cat
+                break
+        worst_cat = worst_cat or "Good"
+        worst_color = CATEGORY_COLORS[worst_cat]
+        if latest_year == pd.Timestamp.now().year:
+            remaining = max(0, 366 if pd.Timestamp.now().is_leap_year else 365)
+            remaining -= total_days
+            days_line = f"last {total_days} days in {latest_year} ({remaining} days remaining)"
+        else:
+            days_line = f"{total_days} observed days in {latest_year}"
+
+        chips = []
+        for cat in CATEGORY_ORDER:
+            cnt = int(counts.get(cat, 0))
+            chips.append(
+                ui.div(
+                    ui.span(cat, class_="category-chip-label", style=f"background:{CATEGORY_COLORS[cat]};"),
+                    ui.span(f"{cnt} Days", class_="category-chip-count"),
+                    class_="category-chip-row",
+                )
+            )
+        good_pct = good_days / total_days * 100 if total_days else 0
+        risk_text = "Low" if worst_cat == "Good" else "Moderate" if worst_cat in ["Moderate", "USG"] else "High"
+
+        return ui.div(
+            ui.p(
+                "Total number of days with different AQI categories in ",
+                ui.strong(days_line),
+                class_="category-summary-lead",
+            ),
+            ui.div(*chips, class_="category-chip-grid"),
+            ui.div(
+                ui.div(
+                    ui.span("Under safe air limit"),
+                    ui.strong(f"{good_pct:.0f}%", style=f"color:{CATEGORY_COLORS['Good']};"),
+                    class_="category-stat-card",
+                ),
+                ui.div(
+                    ui.span("Health risk level"),
+                    ui.strong(risk_text, style=f"color:{worst_color};"),
+                    class_="category-stat-card",
+                ),
+                class_="category-stat-grid",
+            ),
+            ui.p(
+                ui.HTML(
+                    f"In <b>{latest_year}</b>, <span style='color:{CATEGORY_COLORS['Good']};font-weight:800;'>{good_pct:.0f}%</span> "
+                    f"of observed days were within the Good AQI range, while "
+                    f"<span style='color:{worst_color};font-weight:800;'>{non_good_days}</span> day(s) required more caution. "
+                    f"The strongest observed risk category was "
+                    f"<span style='color:{worst_color};font-weight:800;'>{worst_cat}</span>."
+                ),
+                class_="category-summary-text",
+            ),
+            class_="category-summary-panel",
+        )
+
+    @output
     @render.ui
     def category_matrix_ui():
         df = daily_data()
@@ -335,59 +541,68 @@ def history_server(
             return ui.div("No data", style="color:#6b7280;")
         df = df.copy()
         df["category"] = df["value"].apply(aqi_category)
-        categories = ["Good", "Moderate", "USG", "Unhealthy", "Very Unhealthy", "Hazardous"]
-        cat_colors = {"Good": "#2bb673", "Moderate": "#f5b700", "USG": "#f28f3b", "Unhealthy": "#d1495b", "Very Unhealthy": "#7b2cbf", "Hazardous": "#5a189a"}
+        categories = CATEGORY_ORDER
+        cat_colors = CATEGORY_COLORS
 
         years = sorted(df["year"].unique(), reverse=True)
 
         # Table header
-        html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.82rem;">'
+        html = '<div class="category-matrix-scroll"><table class="category-matrix-table">'
         html += '<tr>'
-        html += '<th style="text-align:left;padding:8px;color:#6b7280;"></th>'
+        html += '<th></th>'
         for yr in years:
             yr_avg = df[df["year"] == yr]["value"].mean()
-            html += f'<th style="text-align:center;padding:8px;min-width:120px;"><div style="font-weight:700;color:#e8eaed;">{yr}</div><div style="color:#9aa0a6;font-size:0.75rem;">{yr_avg:.0f} AQI</div></th>'
+            html += f'<th><div class="matrix-year">{yr}</div><div class="matrix-year-aqi">{yr_avg:.0f} AQI</div></th>'
         html += '</tr>'
 
         for m in range(1, 13):
-            html += f'<tr><td style="padding:6px 8px;color:#9aa0a6;font-weight:600;">{MONTH_NAMES[m-1]}</td>'
+            html += f'<tr><td class="matrix-month">{MONTH_NAMES[m-1]}</td>'
             for yr in years:
                 month_data = df[(df["year"] == yr) & (df["month"] == m)]
                 if month_data.empty:
-                    html += '<td style="padding:4px;"></td>'
+                    html += '<td class="matrix-empty"></td>'
                     continue
                 counts = month_data["category"].value_counts()
                 total = counts.sum()
-                bar = '<div style="display:flex;height:22px;border-radius:3px;overflow:hidden;gap:1px;">'
+                bar = '<div class="matrix-stacked-bar">'
                 for cat in categories:
                     cnt = counts.get(cat, 0)
                     if cnt > 0:
                         pct = cnt / total * 100
-                        bar += f'<div style="width:{pct}%;background:{cat_colors[cat]};display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:#fff;font-weight:700;" title="{cat}: {cnt} days">{cnt if cnt > 2 else ""}</div>'
+                        tip = f"{MONTH_NAMES[m-1]} {yr} · {cat}: {cnt} day(s)"
+                        label = cnt if cnt > 2 else ""
+                        bar += (
+                            f'<div class="matrix-segment" data-tooltip="{tip}" '
+                            f'style="width:{pct}%;background:{cat_colors[cat]};">{label}</div>'
+                        )
                 bar += '</div>'
-                html += f'<td style="padding:4px 6px;">{bar}</td>'
+                html += f'<td>{bar}</td>'
             html += '</tr>'
 
         # Total row
-        html += '<tr style="border-top:2px solid #363b44;"><td style="padding:6px 8px;color:#e8eaed;font-weight:700;">Total</td>'
+        html += '<tr class="matrix-total-row"><td>Total</td>'
         for yr in years:
             yr_data = df[df["year"] == yr]
             counts = yr_data["category"].value_counts()
             total = counts.sum()
-            bar = '<div style="display:flex;height:22px;border-radius:3px;overflow:hidden;gap:1px;">'
+            bar = '<div class="matrix-stacked-bar">'
             for cat in categories:
                 cnt = counts.get(cat, 0)
                 if cnt > 0:
                     pct = cnt / total * 100
-                    bar += f'<div style="width:{pct}%;background:{cat_colors[cat]};display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:#fff;font-weight:700;">{cnt}</div>'
+                    tip = f"{yr} total · {cat}: {cnt} day(s)"
+                    bar += (
+                        f'<div class="matrix-segment" data-tooltip="{tip}" '
+                        f'style="width:{pct}%;background:{cat_colors[cat]};">{cnt}</div>'
+                    )
             bar += '</div>'
-            html += f'<td style="padding:4px 6px;">{bar}</td>'
+            html += f'<td>{bar}</td>'
         html += '</tr></table></div>'
 
         # Legend
-        legend = '<div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;">'
+        legend = '<div class="category-legend">'
         for cat in categories:
-            legend += f'<span style="display:flex;align-items:center;gap:4px;font-size:0.75rem;color:#9aa0a6;"><span style="width:10px;height:10px;border-radius:2px;background:{cat_colors[cat]};display:inline-block;"></span>{cat}</span>'
+            legend += f'<span><span style="background:{cat_colors[cat]};"></span>{cat}</span>'
         legend += '</div>'
 
         return ui.HTML(html + legend)
@@ -404,8 +619,12 @@ def history_server(
         good_pct = (yr_cat == "Good").sum() / len(yr_cat) * 100 if len(yr_cat) > 0 else 0
         return ui.div(
             ui.div("WHAT THIS SHOWS", class_="insight-label"),
-            ui.p(f"In {latest_year}, only {good_pct:.0f}% of days had Good air quality (AQI ≤ 50). "
-                 f"Each colored segment shows the proportion of days in each AQI category per month."),
+            ui.p(ui.HTML(
+                f"In <span class='insight-highlight'>{latest_year}</span>, only "
+                f"<span class='insight-good'>{good_pct:.0f}%</span> of days had Good air quality "
+                f"(<span class='insight-good'>AQI ≤ 50</span>). Each colored segment shows the proportion "
+                "of days in each AQI category per month."
+            )),
             class_="insight-box",
         )
 

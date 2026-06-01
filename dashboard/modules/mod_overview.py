@@ -34,6 +34,40 @@ def _blank(msg: str = "No data available") -> go.Figure:
     return _dark_fig(fig)
 
 
+def _recent_aqi(city_hourly: pd.DataFrame) -> pd.DataFrame:
+    if city_hourly.empty or "aqi" not in city_hourly.columns or "local_time" not in city_hourly.columns:
+        return pd.DataFrame()
+    recent = city_hourly[["local_time", "aqi"]].copy()
+    recent["aqi"] = pd.to_numeric(recent["aqi"], errors="coerce")
+    recent = recent.dropna(subset=["local_time", "aqi"]).sort_values("local_time").tail(24)
+    if recent.empty:
+        return recent
+    recent["period"] = np.where(recent["local_time"].dt.hour.between(6, 17), "Day", "Night")
+    return recent
+
+
+def _time_label(ts: pd.Timestamp) -> str:
+    if pd.isna(ts):
+        return "unknown time"
+    return pd.Timestamp(ts).strftime("%I %p").lstrip("0")
+
+
+def _date_label(ts: pd.Timestamp) -> str:
+    if pd.isna(ts):
+        return ""
+    return pd.Timestamp(ts).strftime("%d %b")
+
+
+def _snapshot_aqi(snapshot_value: dict | None, city_hourly: pd.DataFrame) -> float | None:
+    aqi = snapshot_value.get("aqi") if isinstance(snapshot_value, dict) else None
+    if aqi is None or pd.isna(aqi):
+        latest = city_hourly["aqi"].dropna() if "aqi" in city_hourly.columns else pd.Series(dtype=float)
+        aqi = latest.iloc[-1] if not latest.empty else None
+    if aqi is None or pd.isna(aqi):
+        return None
+    return float(aqi)
+
+
 # ── UI ──────────────────────────────────────────────────────────────────────────
 
 @module.ui
@@ -46,9 +80,9 @@ def overview_ui():
                 # AQI block
                 ui.div(
                     ui.div("● LIVE", style="font-size:0.7rem;font-weight:700;color:#d1495b;margin-bottom:6px;letter-spacing:0.08em;"),
-                    ui.div(ui.output_text("hero_aqi_value"), class_="hero-aqi-number"),
+                    ui.output_ui("hero_aqi_value"),
                     ui.div("AQI (US)", class_="hero-aqi-label"),
-                    ui.div(ui.output_text("hero_category"), class_="hero-category"),
+                    ui.output_ui("hero_category"),
                     class_="hero-aqi-block",
                 ),
                 # Info
@@ -63,6 +97,7 @@ def overview_ui():
                         ui.tags.span(style="background:#d1495b"),
                         ui.tags.span(style="background:#7b2cbf"),
                         ui.tags.span(style="background:#5a189a"),
+                        ui.output_ui("aqi_scale_marker"),
                         class_="aqi-scale-bar",
                     ),
                     ui.div(
@@ -102,6 +137,7 @@ def overview_ui():
                     ui.output_ui("map_mascot_ui"),
                     class_="station-map-showcase",
                 ),
+                ui.output_ui("health_advice_ui"),
                 class_="panel",
             ),
             class_="grid-hero",
@@ -130,25 +166,31 @@ def overview_server(
     district_map_frame: Callable,
 ):
     @output
-    @render.text
+    @render.ui
     def hero_aqi_value():
-        snap = snapshot.get()
-        aqi = snap.get("aqi") if isinstance(snap, dict) else None
-        if aqi is None or pd.isna(aqi):
-            # Fallback to latest city data
-            latest = city_hourly["aqi"].dropna()
-            return str(int(latest.iloc[-1])) if not latest.empty else "—"
-        return str(int(float(aqi)))
+        aqi = _snapshot_aqi(snapshot.get(), city_hourly)
+        if aqi is None:
+            return ui.div("—", class_="hero-aqi-number")
+        color = aqi_color(aqi)
+        return ui.div(str(int(aqi)), class_="hero-aqi-number", style=f"color:{color};")
 
     @output
-    @render.text
+    @render.ui
     def hero_category():
-        snap = snapshot.get()
-        aqi = snap.get("aqi") if isinstance(snap, dict) else None
-        if aqi is None or pd.isna(aqi):
-            latest = city_hourly["aqi"].dropna()
-            aqi = latest.iloc[-1] if not latest.empty else None
-        return aqi_category(aqi)
+        aqi = _snapshot_aqi(snapshot.get(), city_hourly)
+        category = aqi_category(aqi)
+        color = aqi_color(aqi)
+        return ui.div(category, class_="hero-category", style=f"color:{color};")
+
+    @output
+    @render.ui
+    def aqi_scale_marker():
+        aqi = _snapshot_aqi(snapshot.get(), city_hourly)
+        if aqi is None:
+            return ui.div()
+        pct = min(max(aqi / 500 * 100, 0), 100)
+        color = aqi_color(aqi)
+        return ui.tags.span(class_="aqi-scale-marker", style=f"left:{pct}%;--marker-color:{color};")
 
     @output
     @render.text
@@ -202,63 +244,115 @@ def overview_server(
     @output
     @render_widget
     def daynight_plot():
-        df = city_hourly.copy()
-        if df.empty or "aqi" not in df.columns:
-            return _blank()
-        recent = df.tail(24).copy()
+        recent = _recent_aqi(city_hourly)
         if len(recent) < 2:
             return _blank("Not enough hourly data")
-        recent["hour"] = recent["local_time"].dt.hour
+
+        recent = recent.reset_index(drop=True)
+        recent["plot_idx"] = np.arange(len(recent))
         fig = go.Figure()
-        # Day/night background
-        fig.add_vrect(x0=-0.5, x1=17.5, fillcolor="rgba(74,144,217,0.06)", line_width=0)
-        fig.add_vrect(x0=17.5, x1=23.5, fillcolor="rgba(26,29,78,0.12)", line_width=0)
+
+        segments = []
+        start = 0
+        current_period = recent.loc[0, "period"]
+        for idx in range(1, len(recent)):
+            period = recent.loc[idx, "period"]
+            if period != current_period:
+                segments.append((start, idx - 1, current_period))
+                start = idx
+                current_period = period
+        segments.append((start, len(recent) - 1, current_period))
+        for start_idx, end_idx, period in segments:
+            fill = "rgba(86,151,209,0.08)" if period == "Day" else "rgba(44,54,121,0.14)"
+            fig.add_vrect(x0=start_idx - 0.5, x1=end_idx + 0.5, fillcolor=fill, line_width=0, layer="below")
+
         fig.add_trace(go.Scatter(
-            x=list(recent["hour"]),
+            x=list(recent["plot_idx"]),
             y=list(recent["aqi"]),
             mode="lines+markers",
-            line={"color": "#f5b700", "width": 2.5},
-            marker={"size": 5, "color": "#f5b700"},
+            line={"color": "#f6d433", "width": 2.8, "shape": "spline", "smoothing": 0.85},
+            marker={"size": 5, "color": "#f6d433", "line": {"width": 0}},
             fill="tozeroy",
-            fillcolor="rgba(245,183,0,0.08)",
+            fillcolor="rgba(246,211,51,0.09)",
             name="AQI",
+            customdata=np.stack([
+                recent["local_time"].dt.strftime("%d %b, %H:%M"),
+                recent["period"],
+            ], axis=-1),
+            hovertemplate="%{customdata[0]}<br>%{customdata[1]}<br>AQI %{y:.0f}<extra></extra>",
         ))
-        fig.add_annotation(text="☀️ Day", x=9, y=0.95, xref="x", yref="paper", showarrow=False, font={"size": 12, "color": "#87ceeb"})
-        fig.add_annotation(text="🌙 Night", x=21, y=0.95, xref="x", yref="paper", showarrow=False, font={"size": 12, "color": "#6b7cc4"})
-        fig.update_xaxes(title="Hour", dtick=3, range=[-0.5, 23.5])
+
+        fig.add_annotation(text="☀", x=0.31, y=0.78, xref="paper", yref="paper", showarrow=False, font={"size": 52, "color": "rgba(246,211,51,0.16)"})
+        fig.add_annotation(text="☾", x=0.84, y=0.78, xref="paper", yref="paper", showarrow=False, font={"size": 52, "color": "rgba(148,163,255,0.18)"})
+        fig.add_annotation(text="Day", x=0.30, y=0.96, xref="paper", yref="paper", showarrow=False, font={"size": 12, "color": "#9bdcff"})
+        fig.add_annotation(text="Night", x=0.86, y=0.96, xref="paper", yref="paper", showarrow=False, font={"size": 12, "color": "#94a3ff"})
+        tick_idx = list(range(0, len(recent), 3))
+        fig.update_xaxes(
+            title="Hour",
+            tickmode="array",
+            tickvals=tick_idx,
+            ticktext=[recent.loc[i, "local_time"].strftime("%H:%M") for i in tick_idx],
+            range=[-0.5, len(recent) - 0.5],
+        )
         fig.update_yaxes(title="AQI")
-        fig.update_layout(showlegend=False)
+        fig.update_layout(showlegend=False, hovermode="x unified")
         return _dark_fig(fig, height=260)
 
     @output
     @render.ui
     def daynight_summary():
-        df = city_hourly.copy()
-        if df.empty:
-            return ui.div()
-        recent = df.tail(24).copy()
+        recent = _recent_aqi(city_hourly)
         if len(recent) < 2:
             return ui.div()
-        day = recent[recent["local_time"].dt.hour.between(6, 17)]
-        night = recent[~recent["local_time"].dt.hour.between(6, 17)]
+
+        day = recent[recent["period"] == "Day"]
+        night = recent[recent["period"] == "Night"]
         day_max = day["aqi"].max() if not day.empty else np.nan
         day_min = day["aqi"].min() if not day.empty else np.nan
         night_max = night["aqi"].max() if not night.empty else np.nan
         night_min = night["aqi"].min() if not night.empty else np.nan
+        day_avg = day["aqi"].mean() if not day.empty else np.nan
+        night_avg = night["aqi"].mean() if not night.empty else np.nan
+        peak = recent.loc[recent["aqi"].idxmax()]
+        low = recent.loc[recent["aqi"].idxmin()]
+        delta = recent["aqi"].iloc[-1] - recent["aqi"].iloc[0]
+        if abs(delta) < 5:
+            trend_text = "roughly stable"
+        elif delta > 0:
+            trend_text = f"up by {delta:.0f} points"
+        else:
+            trend_text = f"down by {abs(delta):.0f} points"
+
+        def summary_card(label: str, max_val: float, min_val: float, avg_val: float, class_name: str):
+            return ui.div(
+                ui.div(label, class_="dn-label"),
+                ui.div(f"{max_val:.0f}" if not pd.isna(max_val) else "—", class_="dn-value"),
+                ui.div(
+                    f"Avg {avg_val:.0f} · Low {min_val:.0f}" if not pd.isna(avg_val) and not pd.isna(min_val) else "",
+                    class_="dn-detail",
+                ),
+                class_=class_name,
+            )
+
         return ui.div(
             ui.div(
-                ui.div("☀️ Daytime", class_="dn-label"),
-                ui.div(f"{day_max:.0f}" if not pd.isna(day_max) else "—", class_="dn-value"),
-                ui.div(f"Peak · Low {day_min:.0f}" if not pd.isna(day_min) else "", class_="dn-detail"),
-                class_="day-summary",
+                summary_card("☀ Daytime Peak", day_max, day_min, day_avg, "day-summary"),
+                summary_card("☾ Nighttime Peak", night_max, night_min, night_avg, "night-summary"),
+                class_="day-night-container",
             ),
             ui.div(
-                ui.div("🌙 Nighttime", class_="dn-label"),
-                ui.div(f"{night_max:.0f}" if not pd.isna(night_max) else "—", class_="dn-value"),
-                ui.div(f"Peak · Low {night_min:.0f}" if not pd.isna(night_min) else "", class_="dn-detail"),
-                class_="night-summary",
+                ui.div("WHAT THIS SHOWS", class_="insight-label"),
+                ui.p(ui.HTML(
+                    f"In the last <span class='insight-highlight'>24 hours</span>, Hanoi's AQI peaked at "
+                    f"<span class='insight-highlight'>{peak['aqi']:.0f}</span> around "
+                    f"<span class='insight-soft'>{_time_label(peak['local_time'])}</span> on {_date_label(peak['local_time'])}. "
+                    f"The lowest point was <span class='insight-good'>{low['aqi']:.0f}</span> around "
+                    f"<span class='insight-soft'>{_time_label(low['local_time'])}</span>. "
+                    f"Compared with the first hour, the latest reading is <span class='insight-highlight'>{trend_text}</span>."
+                )),
+                class_="insight-box day-night-note",
             ),
-            class_="day-night-container",
+            class_="day-night-block",
         )
 
     @output
@@ -339,6 +433,61 @@ def overview_server(
                 class_="map-mascot-card",
             ),
             class_="map-mascot-wrap",
+        )
+
+    @output
+    @render.ui
+    def health_advice_ui():
+        recent = city_hourly.copy()
+        if recent.empty or "pm25" not in recent.columns:
+            return ui.div()
+        recent = recent.dropna(subset=["pm25"]).tail(24)
+        if recent.empty:
+            return ui.div()
+
+        pm25_avg = float(pd.to_numeric(recent["pm25"], errors="coerce").dropna().mean())
+        if pd.isna(pm25_avg):
+            return ui.div()
+        cigs_day = max(0.0, pm25_avg / 22.0)
+        cigs_week = cigs_day * 7
+        cigs_month = cigs_day * 30
+
+        return ui.div(
+            ui.div(
+                ui.div(
+                    ui.div(f"{cigs_day:.1f}", class_="cigarette-main"),
+                    ui.div("cigarettes per day", class_="cigarette-label"),
+                    ui.div(class_="cigarette-visual"),
+                    ui.p(
+                        ui.HTML(
+                            "Breathing Hanoi air in the last 24h is roughly comparable to "
+                            f"<span class='insight-highlight'>{cigs_day:.1f}</span> cigarette(s) per day "
+                            f"based on average PM2.5 of <span class='insight-highlight'>{pm25_avg:.1f} µg/m³</span>."
+                        ),
+                        class_="health-equivalent-text",
+                    ),
+                    class_="health-cigarette-block",
+                ),
+                ui.div(
+                    ui.div("Weekly", class_="health-period-label"),
+                    ui.div(f"{cigs_week:.1f}", class_="health-period-value"),
+                    ui.div("cigarette-equivalent", class_="health-period-unit"),
+                    class_="health-period-card",
+                ),
+                ui.div(
+                    ui.div("Monthly", class_="health-period-label"),
+                    ui.div(f"{cigs_month:.0f}", class_="health-period-value"),
+                    ui.div("cigarette-equivalent", class_="health-period-unit"),
+                    class_="health-period-card",
+                ),
+                class_="health-advice-top",
+            ),
+            ui.div(
+                ui.div("Berkeley Earth rule of thumb: 1 cigarette/day ≈ 22 µg/m³ PM2.5. This is an exposure framing estimate, not a medical diagnosis.", class_="health-disclaimer"),
+                ui.div("Source: Berkeley Earth", class_="health-source"),
+                class_="health-note-row",
+            ),
+            class_="health-advice-card",
         )
 
     @output

@@ -35,7 +35,7 @@ Choropleth across Hanoi's 30 districts with multi-select filtering, ranking heat
 
 ### 3. History
 
-GitHub-style calendar heatmap, multi-year comparison, AQI-category distribution, and annual/seasonal pattern tracking.
+GitHub-style calendar heatmap, multi-year comparison, AQI-category distribution, annual/seasonal pattern tracking, and raw-vs-cleaned data quality controls with anomaly markers.
 
 ![History tab — calendar heatmap](image/history1.png)
 ![History tab — multi-year overlay](image/history2.png)
@@ -69,8 +69,23 @@ City-level fields include AQI, PM2.5, PM10, CO, NO2, O3, SO2, temperature, humid
 - **Models:** scikit-learn Histogram Gradient Boosting Regressor variants, selected by chronological validation MAE.
 - **Baseline:** persistence / no-change forecast.
 - **Explanation:** error comparison vs baseline, feature importance, and predicted-vs-actual validation chart.
+- **Data quality modes:** models can be trained on raw data or cleaned, anomaly-aware data.
 
 Trained models are cached as `.joblib` files in `dashboard/models/` so the app starts instantly without re-training.
+
+## Data Quality and Anomaly Handling
+
+Air-quality data can contain both real extreme pollution episodes and sensor-like spikes. The dashboard keeps raw measurements unchanged while creating cleaned companion columns for city-level AQI, pollutant, and weather data.
+
+The anomaly layer:
+
+- applies physical plausibility checks, such as AQI in `[0, 500]`, humidity in `[0, 100]`, and non-negative pollutant values;
+- uses rolling median and MAD-based robust z-scores to flag unusual hourly values;
+- separates likely **multi-pollutant pollution episodes** from isolated **sensor-like anomalies**;
+- smooths only physically invalid or isolated sensor-like spikes in cleaned mode;
+- keeps likely real pollution episodes visible in the cleaned data.
+
+History charts can switch between **Raw** and **Cleaned** modes and can overlay anomaly markers. Forecast models can also switch between raw and cleaned training data, allowing the final report to compare robustness and model error.
 
 ## Tech Stack
 
@@ -126,6 +141,7 @@ HaNoiAQI/
     ├── hanoi_skyline.png      Hero background
     ├── modules/               Per-tab UI + server (Overview / Districts / History / Forecast)
     ├── src/                   Data loading, model, realtime API, utilities
+    │   └── anomaly.py          Raw/cleaned data-quality and anomaly detection logic
     ├── scripts/               Preprocessing + model training scripts
     ├── processed/             Compact Parquet inputs
     ├── models/                Cached forecast models (.joblib)

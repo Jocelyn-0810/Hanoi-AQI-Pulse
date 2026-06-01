@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.anomaly import apply_city_quality_flags
 from src.utils import aqi_category
 
 
@@ -39,7 +40,7 @@ def load_city_hourly(data_root: Path, processed_root: Path | None = None) -> pd.
             city["local_time"] = pd.to_datetime(city["local_time"], errors="coerce")
             if "aqi_category" not in city.columns:
                 city["aqi_category"] = city["aqi"].apply(aqi_category)
-            return city
+            return apply_city_quality_flags(city)
 
     # Fallback to CSV
     phung_dir = data_root / "phungdinhdat__aqi-in-hanoi-2022-2025"
@@ -72,7 +73,7 @@ def load_city_hourly(data_root: Path, processed_root: Path | None = None) -> pd.
     city["month"] = city["local_time"].dt.month
     city["date"] = city["local_time"].dt.date
     city["year_month"] = city["local_time"].dt.to_period("M").astype(str)
-    return city
+    return apply_city_quality_flags(city)
 
 
 # ── District daily ──────────────────────────────────────────────────────────

@@ -17,6 +17,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+from src.anomaly import metric_col_for_mode
+
 
 @dataclass
 class ModelArtifacts:
@@ -32,6 +34,7 @@ class ModelArtifacts:
     model_name: str
     trained_rows: int
     target_col: str = "aqi"
+    data_mode: str = "raw"
 
 
 FEATURE_BASE = [
@@ -53,9 +56,15 @@ def _build_features(
     city_hourly: pd.DataFrame,
     horizon_hours: int,
     target_col: str = "aqi",
+    data_mode: str = "raw",
 ) -> tuple[pd.DataFrame, pd.Series, list[str], pd.Series]:
     df = city_hourly.sort_values("local_time").copy()
     df = _safe_numeric(df, FEATURE_BASE)
+    if data_mode == "cleaned":
+        for col in FEATURE_BASE:
+            clean_col = metric_col_for_mode(df, col, data_mode)
+            if clean_col in df.columns:
+                df[col] = pd.to_numeric(df[clean_col], errors="coerce")
 
     # Time features
     df["hour"] = df["local_time"].dt.hour
@@ -141,8 +150,14 @@ def train_city_model(
     city_hourly: pd.DataFrame,
     horizon_hours: int = 1,
     target_col: str = "aqi",
+    data_mode: str = "raw",
 ) -> ModelArtifacts:
-    X, y, feature_cols, times = _build_features(city_hourly, horizon_hours=horizon_hours, target_col=target_col)
+    X, y, feature_cols, times = _build_features(
+        city_hourly,
+        horizon_hours=horizon_hours,
+        target_col=target_col,
+        data_mode=data_mode,
+    )
     if len(X) < 200:
         raise ValueError("Not enough rows after feature engineering to train model.")
 
@@ -206,6 +221,7 @@ def train_city_model(
         model_name=best_name,
         trained_rows=len(X),
         target_col=target_col,
+        data_mode=data_mode,
     )
 
 
@@ -216,6 +232,11 @@ def predict_next(
 ) -> float:
     """Predict next AQI or PM2.5 value."""
     df = city_hourly.sort_values("local_time").copy()
+    if getattr(artifacts, "data_mode", "raw") == "cleaned":
+        for col in FEATURE_BASE:
+            clean_col = metric_col_for_mode(df, col, "cleaned")
+            if clean_col in df.columns:
+                df[col] = pd.to_numeric(df[clean_col], errors="coerce")
     row = df.iloc[-1:].copy()
     now = pd.Timestamp.now()
     row["hour"] = now.hour
@@ -248,25 +269,28 @@ def predict_next(
 predict_next_aqi = predict_next
 
 
-def model_path(model_dir: Path, horizon_hours: int, target_col: str = "aqi") -> Path:
-    return model_dir / f"{target_col}_horizon_{horizon_hours}h.joblib"
+def model_path(model_dir: Path, horizon_hours: int, target_col: str = "aqi", data_mode: str = "raw") -> Path:
+    suffix = "" if data_mode == "raw" else f"_{data_mode}"
+    return model_dir / f"{target_col}_horizon_{horizon_hours}h{suffix}.joblib"
 
 
 def save_model_artifact(artifact: ModelArtifacts, model_dir: Path) -> Path:
     model_dir.mkdir(parents=True, exist_ok=True)
-    path = model_path(model_dir, artifact.horizon_hours, artifact.target_col)
+    path = model_path(model_dir, artifact.horizon_hours, artifact.target_col, getattr(artifact, "data_mode", "raw"))
     joblib.dump(artifact, path, compress=5)
     return path
 
 
-def load_model_artifact(model_dir: Path, horizon_hours: int, target_col: str = "aqi") -> ModelArtifacts | None:
-    path = model_path(model_dir, horizon_hours, target_col)
+def load_model_artifact(model_dir: Path, horizon_hours: int, target_col: str = "aqi", data_mode: str = "raw") -> ModelArtifacts | None:
+    path = model_path(model_dir, horizon_hours, target_col, data_mode)
     if not path.exists():
         return None
     try:
         artifact = joblib.load(path)
         if not isinstance(artifact, ModelArtifacts):
             return None
+        if not hasattr(artifact, "data_mode"):
+            artifact.data_mode = data_mode
         return artifact
     except Exception:
         return None

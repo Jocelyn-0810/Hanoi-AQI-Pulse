@@ -235,6 +235,7 @@ Suggested flow:
 ### Data and Model Work
 
 - Validate AQICN station freshness rules.
+- Add anomaly-aware raw/cleaned data quality modes for historical charts and forecasting.
 - Improve feature names and explanation.
 - Add stronger model comparison if time allows.
 - Export model metrics for final report.
@@ -266,5 +267,6 @@ Replace names with actual team members.
 
 - Realtime AQICN stations can be stale or missing, so the app needs fallback behavior.
 - District-level sensor data may be uneven across time and districts.
+- AQI and pollutant time series contain extreme values; the app should distinguish real pollution episodes from likely sensor-like spikes instead of blindly deleting outliers.
 - City-level forecasting is stronger than district-level forecasting at this stage.
 - The proposal dashboard is already functional, but final insights and deployment still need refinement.
