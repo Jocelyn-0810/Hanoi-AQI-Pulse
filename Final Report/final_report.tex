@@ -50,6 +50,11 @@ Spring 2026}
 
 \setlist{noitemsep, topsep=2pt, leftmargin=1.4em}
 
+% Labelled "design decision" notes used per dashboard tab in Section 2.
+\newenvironment{designnotes}
+  {\begin{description}[leftmargin=0pt, itemsep=2pt, parsep=1pt, topsep=3pt, style=unboxed, font=\normalfont\bfseries]}
+  {\end{description}}
+
 \begin{document}
 
 %==================== TITLE BLOCK ====================
@@ -57,11 +62,11 @@ Spring 2026}
     {\LARGE \textbf{\color{DarkRed} Hanoi Air Quality Pulse}}\\[2pt]
     {\large Interactive Spatial, Temporal, and Predictive Visualization of Urban Air Pollution}\\[8pt]
     % TODO: replace with full names + student IDs
-    {\normalsize Duc, Giang, Tri, Linh}\\[2pt]
+    {\normalsize Duc, Giang, Tri, Linh, Hung}\\[2pt]
     {\small VinUniversity --- College of Engineering and Computer Science}\\[4pt]
     {\small Live demo: \href{https://giangnguyenson.shinyapps.io/hanoi-aqi-pulse/}{shinyapps.io/hanoi-aqi-pulse}
-    \quad\textbar\quad % TODO: confirm/replace GitHub URL
-    Source: \href{https://github.com/}{GitHub repository}}
+    \quad\textbar\quad
+    Source: \href{https://github.com/songiangvn/Hanoi-AQI-Pulse}{github.com/songiangvn/Hanoi-AQI-Pulse}}
 \end{center}
 
 %==================== ABSTRACT ====================
@@ -137,8 +142,9 @@ direct cross-view comparison. Health framing drives the plain-language advisorie
 \end{table}
 
 \subsection{Overview --- the present, at a glance}
-\textbf{User goal:} understand the current citywide situation in seconds and know what it means.
-\textbf{Encodings \& rationale:} a large hero AQI number with a six-band scale marker gives an immediate
+\begin{designnotes}
+\item[User goal:] understand the current citywide situation in seconds and know what it means.
+\item[Encodings \& rationale:] a large hero AQI number with a six-band scale marker gives an immediate
 glanceable status, positioning today's value on the full $0$--$500$ risk range. The ``Realtime AQI History
 --- Last 24 Hours'' chart is a spline line with day/night background shading (\texttt{Vrect}); time-of-day
 shading was chosen over a plain line because diurnal context is the key question for a 24~h window. The
@@ -148,21 +154,22 @@ distinct from the yellow observed line so prediction is never mistaken for measu
 colour --- redundant encoding aids memorability and landmark orientation (a VinUni marker). To translate
 risk for non-experts, a PM2.5 ``cigarettes/day'' exposure card and the Lexce mascot map the current
 category to a mood and a short advisory.
-\textbf{Interaction:} a 3D$\leftrightarrow$2D toggle (the 2D scatter-mapbox is the accessible fallback),
+\item[Interaction:] a 3D$\leftrightarrow$2D toggle (the 2D scatter-mapbox is the accessible fallback),
 map hover tooltips, and optional realtime polling that refreshes the snapshot and re-runs the 1~h forecast
 (Figure~\ref{fig:overview}).
-\textbf{Key insight:} a live reading is immediately legible \emph{and} actionable.
-\textbf{Narrative link:} establishes the ``now'' anchor before the user explores space and time.
+\item[Key insight:] a live reading is immediately legible \emph{and} actionable.
+\item[Narrative link:] establishes the ``now'' anchor before the user explores space and time.
+\end{designnotes}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 \centering
-\begin{subfigure}{0.86\textwidth}\centering
+\begin{subfigure}{0.7\textwidth}\centering
 \includegraphics[width=\linewidth]{fig_overview_1.jpg}
 \caption{Live hero AQI (172, ``Unhealthy'') on the six-band scale, AQICN timestamp, the Hanoi skyline
 motif, and the plain-language ``what this means'' advisory.}
 \end{subfigure}
 \\[4pt]
-\begin{subfigure}{0.86\textwidth}\centering
+\begin{subfigure}{0.7\textwidth}\centering
 \includegraphics[width=\linewidth]{fig_overview_2.jpg}
 \caption{The 24\,h realtime line with day/night shading and the cyan dashed 1\,h forecast; day/night peak
 cards; PM2.5 ``cigarettes/day'' exposure; and the 3D Hanoi map with live station, VinUni landmark, and the
@@ -174,31 +181,33 @@ distinguished.}
 \end{figure}
 
 \subsection{Districts --- spatial inequality, explorable}
-\textbf{User goal:} find which districts are most polluted and how the ranking shifts by month/year.
-\textbf{Encodings \& rationale:} a choropleth is the canonical value-per-region encoding; selected
+\begin{designnotes}
+\item[User goal:] find which districts are most polluted and how the ranking shifts by month/year.
+\item[Encodings \& rationale:] a choropleth is the canonical value-per-region encoding; selected
 districts are saturated while unselected ones dim to context. The ranking is a \emph{heatmap-table} ---
 exact rank and value in a sortable table, with twelve month columns coloured by the AQI scale --- chosen
 over a plain sorted bar chart because it preserves per-district \emph{seasonality} in the same view. A
 multi-line monthly trend adds a dotted city-average baseline for reference, and a horizontal pollutant bar
 breaks the selection into its six constituent pollutants.
-\textbf{Interaction (the strongest coordinated-views story):} one district selection --- made by checkbox
+\item[Interaction (the strongest coordinated-views story):] one district selection --- made by checkbox
 or by a preset (\textit{Top~5}, \textit{Above avg}, \textit{PM2.5 hotspots}, \textit{Select all},
 \textit{Clear}) --- simultaneously filters the map, ranking table, trend, and breakdown. Year/month
 controls re-aggregate the map and ranking while the trend retains year context, so a filter never strands
 the user without comparison. Figure~\ref{fig:districts} shows the linked layout.
-\textbf{Key insight:} citywide averages hide real spatial disparities, and linked selection lets users
+\item[Key insight:] citywide averages hide real spatial disparities, and linked selection lets users
 attribute high months to specific districts.
-\textbf{Narrative link:} the \emph{space} axis of the story.
+\item[Narrative link:] the \emph{space} axis of the story.
+\end{designnotes}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 \centering
-\begin{subfigure}{0.86\textwidth}\centering
+\begin{subfigure}{0.7\textwidth}\centering
 \includegraphics[width=\linewidth]{fig_districts_1.jpg}
 \caption{District selector with presets (Top~5, Above avg, PM2.5 hotspots\ldots) and year/month controls;
 the 3D extruded choropleth; and the ranking table with twelve AQI-coloured month columns.}
 \end{subfigure}
 \\[4pt]
-\begin{subfigure}{0.86\textwidth}\centering
+\begin{subfigure}{0.7\textwidth}\centering
 \includegraphics[width=\linewidth]{fig_districts_2.jpg}
 \caption{The linked monthly trend (selected districts vs.\ a dotted city baseline) and the pollutant
 breakdown bar --- both react to the same selection.}
@@ -209,30 +218,32 @@ and pollutant breakdown together.}
 \end{figure}
 
 \subsection{History --- temporal rhythm and honest anomalies}
-\textbf{User goal:} see daily, seasonal, and multi-year patterns and inspect unusual events.
-\textbf{Encodings \& rationale:} a GitHub-style \emph{calendar heatmap} (day-of-week $\times$ week, AQI
+\begin{designnotes}
+\item[User goal:] see daily, seasonal, and multi-year patterns and inspect unusual events.
+\item[Encodings \& rationale:] a GitHub-style \emph{calendar heatmap} (day-of-week $\times$ week, AQI
 colour) makes an entire year of daily values scannable at once and surfaces seasonal bands and bad-day
 clusters far better than a long line chart. A multi-year \emph{seasonal overlay} plots the same selected
 month across years (current year bold) to separate seasonal signal from year-to-year drift. A category
 donut and a month$\times$year stacked-bar matrix give part-to-whole and small-multiple views of how the
 mix of Good$\rightarrow$Hazardous days evolves.
-\textbf{Interaction:} pollutant (AQI/PM2.5/PM10), year, and month selectors re-target the views, and a
+\item[Interaction:] pollutant (AQI/PM2.5/PM10), year, and month selectors re-target the views, and a
 \emph{``show anomaly markers''} toggle overlays flagged days (red ``$\times$'') \emph{only on request} (Figure~\ref{fig:history}).
 This reveal-on-demand choice keeps production views clean while preserving the ability to audit
 data-quality events --- analytical honesty without clutter.
-\textbf{Key insight:} Hanoi air quality has strong temporal structure; clean visuals and on-demand
+\item[Key insight:] Hanoi air quality has strong temporal structure; clean visuals and on-demand
 anomaly inspection can coexist.
-\textbf{Narrative link:} the \emph{time} axis of the story.
+\item[Narrative link:] the \emph{time} axis of the story.
+\end{designnotes}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 \centering
-\begin{subfigure}{0.86\textwidth}\centering
+\begin{subfigure}{0.7\textwidth}\centering
 \includegraphics[width=\linewidth]{fig_history_1.jpg}
 \caption{Metric/year controls and the anomaly-marker toggle; the quality-controlled-series note (flagged
 vs.\ sensor-like vs.\ episode rows); the daily AQI calendar heatmap; and the multi-year seasonal overlay.}
 \end{subfigure}
 \\[4pt]
-\begin{subfigure}{0.86\textwidth}\centering
+\begin{subfigure}{0.7\textwidth}\centering
 \includegraphics[width=\linewidth]{fig_history_2.jpg}
 \caption{The air-quality category-mix donut and the month$\times$year stacked-bar matrix showing how the
 Good$\rightarrow$Hazardous day mix shifts across seasons and years.}
@@ -243,8 +254,9 @@ data-quality inspection.}
 \end{figure}
 
 \subsection{Forecast --- the future, made interpretable}
-\textbf{User goal:} see short-term predicted risk and judge whether to trust it.
-\textbf{Encodings \& rationale:} the forecast hero reuses the AQI scale and adds a \emph{source-tier chip}
+\begin{designnotes}
+\item[User goal:] see short-term predicted risk and judge whether to trust it.
+\item[Encodings \& rationale:] the forecast hero reuses the AQI scale and adds a \emph{source-tier chip}
 (live input vs.\ historical fallback) so users see how grounded each prediction is. Rather than a single
 number, three diagnostic views build trust: a \emph{Key-Drivers radar} (\texttt{Scatterpolar}, top-7
 permutation-importance features) shows \emph{what} drives the forecast; a \emph{learning-space PCA}
@@ -252,21 +264,22 @@ scatter places the current case among historical backtest cases (coloured by err
 to reveal high-error regions; and grouped \emph{model-vs-baseline} bars plus a backtest line give the
 honest track record (Figure~\ref{fig:forecast}). The PCA view is explicitly labelled a projection of
 engineered regression features, not a neural embedding.
-\textbf{Interaction:} horizon (1/6/24~h) and target (AQI/PM2.5) radios reload the relevant cached model;
+\item[Interaction:] horizon (1/6/24~h) and target (AQI/PM2.5) radios reload the relevant cached model;
 a PCA colour-mode toggle re-encodes without recomputation.
-\textbf{Key insight:} a forecast is only useful if its drivers and error are visible --- so the page sells
+\item[Key insight:] a forecast is only useful if its drivers and error are visible --- so the page sells
 interpretability, not just a value.
-\textbf{Narrative link:} the \emph{future} axis, closing the space$\rightarrow$time$\rightarrow$future arc.
+\item[Narrative link:] the \emph{future} axis, closing the space$\rightarrow$time$\rightarrow$future arc.
+\end{designnotes}
 
-\begin{figure}[htbp]
+\begin{figure}[H]
 \centering
-\begin{subfigure}{0.86\textwidth}\centering
+\begin{subfigure}{0.7\textwidth}\centering
 \includegraphics[width=\linewidth]{fig_forecast_1.jpg}
 \caption{Horizon/target controls; the +6\,h forecast hero (101 AQI, USG) with the source-tier ``Live input''
 chip and delta-from-current; the Lexce forecast mood; and the Key-Drivers radar of top features.}
 \end{subfigure}
 \\[4pt]
-\begin{subfigure}{0.86\textwidth}\centering
+\begin{subfigure}{0.7\textwidth}\centering
 \includegraphics[width=\linewidth]{fig_forecast_2.jpg}
 \caption{Model-vs-baseline error bars (MAE/RMSE), the PCA learning space (current case as a cyan diamond,
 error/target/risk colour modes), and the backtest of model vs.\ persistence over a month.}
@@ -343,7 +356,7 @@ When AQICN is unavailable or incomplete, the app falls back to Open-Meteo or cle
 and the forecast UI makes this explicit with source-tier chips. Reproducibility is supported by a pinned
 \texttt{requirements.txt} and unit tests under \texttt{dashboard/tests/}.
 
-\begin{figure}[h]
+\begin{figure}[H]
 \centering
 \begin{tikzpicture}[
     node distance=6mm and 9mm, font=\footnotesize,
